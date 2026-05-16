@@ -1,299 +1,367 @@
+<p align="center">
+  <img src="docs/images/hero.png" alt="context-window — reusable context, made portable" />
+</p>
+
+<p align="center">
+  <a href="https://github.com/prodevuk/context-window/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/prodevuk/context-window/actions/workflows/ci.yml/badge.svg" /></a>
+  <a href="./LICENSE"><img alt="Licence: MIT" src="https://img.shields.io/badge/licence-MIT-blue.svg" /></a>
+  <img alt="Node" src="https://img.shields.io/badge/node-%E2%89%A520-brightgreen" />
+  <img alt="TypeScript" src="https://img.shields.io/badge/typescript-strict-blue" />
+</p>
+
 # context-window
 
-A context management system with two first-class entities:
+A small, self-hosted tool that helps you build up a **library of reusable context** — and feed exactly the right slice of it to your AI assistants whenever you start a new task.
 
-- **Context** — a reusable, standalone block of structured knowledge (a person, a tech, a process, conventions, anything an LLM might want to load).
-- **Project** — an ordered set of references to contexts; emits a per-project `manifest.json` that LLMs read as an entry point.
+You write a context once (your coding conventions, your business background, notes on a tricky API). You attach it to as many projects as you like. Claude — or any MCP-aware tool — reads a lightweight manifest, asks for the contexts it needs, and gets to work already up to speed.
 
-Local mode is fully implemented: SQLite storage, stdio MCP server, CLI. Cloud mode is a future layer; the core/storage split is designed so that only the storage backend and transport need to swap.
+There's a **CLI**, a **web UI** (with a usage dashboard), and a built-in **MCP server** that plugs into Claude Code, Claude Desktop, and anything else that speaks the Model Context Protocol.
 
-## Install
+---
 
-```bash
-npm install
-npm run build
-```
+## Why does this exist?
 
-Requires Node ≥ 20.
+Every time you start a new AI conversation, you tell the model the same things: who you are, how you work, what this project is about, which APIs you care about. That's wasted effort, and it scales poorly the moment you have more than one project.
+
+context-window gives you one place to:
+
+- **Capture** durable knowledge as named, described, tagged contexts (Markdown).
+- **Curate** which contexts apply to which project — without copy-pasting.
+- **Expose** a single, lightweight manifest to LLMs so they can self-serve the bodies they actually need.
+- **See** which contexts and tools are actually being used, by which client.
+
+Everything runs locally on your machine. Your knowledge stays yours.
+
+---
+
+## At a glance
+
+![context-window dashboard](docs/images/dashboard.png)
+
+The web dashboard shows every MCP, CLI, and web call recorded over a configurable window — broken down by tool, project, context, and the actual LLM client (Claude, GPT, browser, CLI) that made the call.
+
+---
+
+## Features
+
+- **Two clean entities.** *Contexts* are standalone, reusable, versioned bodies of knowledge. *Projects* are ordered references to contexts plus a manifest file LLMs can read.
+- **Local-first.** SQLite + FTS5 search. No accounts, no cloud, no API keys, no network calls (unless you wire your own MCP client to it).
+- **MCP server.** 16 tools: `get_project_summary`, `get_context`, `search_contexts`, `create_context`, `attach_context`, `get_context_budget`, `get_usage_stats`, and more.
+- **CLI.** Manage contexts and projects from your shell. Idempotent project init that scaffolds a `CLAUDE.md` directive so Claude actually uses the tools.
+- **Web UI.** Browse, search, create, edit, archive, and attach contexts. Reorder attached contexts on a project. View a live usage dashboard.
+- **Usage analytics.** Every MCP / CLI / web call is recorded with the calling client's name + version. Time-series, top tools, top contexts, error rates.
+- **Auto-maintained manifests.** Update a context that's attached to three projects — all three manifests rewrite themselves.
+- **Token budgeting.** Ask for the highest-priority subset of contexts that fits a given token budget; everything excluded is reported with a reason.
+
+---
 
 ## Quick start
 
+You need **Node ≥ 20**.
+
 ```bash
-# One-time: initialise the local SQLite database (~/.context-db/context.db by default)
-node dist/cli/index.js context init
+git clone https://github.com/prodevuk/context-window.git
+cd context-window
+npm install
+npm run build
+npm install -g .       # puts `context` and `context-mcp` on your PATH
+```
 
-# In a project directory, create a project (writes .context/manifest.json)
-cd /path/to/your/project
-node /path/to/context-window/dist/cli/index.js project init -n my-project
+### Capture your first context
 
-# Create a standalone context and attach it
-node dist/cli/index.js context new \
+```bash
+cd /path/to/any/project
+context project init -n my-project       # creates the project + a CLAUDE.md directive
+context new \
   -n "Rust Conventions" \
-  -d "Idiomatic Rust style" \
-  --content-file ./rust-style.md \
+  -d "How we write Rust in this codebase" \
+  --content-file ./RUST_STYLE.md \
   --category conventions \
   --tags rust,backend \
   --priority important
-
-node dist/cli/index.js project attach <context-id-prefix>
-
-# Run the MCP server (stdio) for the current project
-node dist/cli/index.js context serve
+context project attach <context-id>      # link it to the current project
 ```
 
-The DB path can be overridden via `--db <path>` or `CONTEXT_DB_PATH`.
+That's it. The project's `.context/manifest.json` is now up to date, and any MCP client pointed at the server will see your context.
 
-## Data model
+### Open the web UI
 
-```
-Context              Project
- ├─ id (uuid)         ├─ id (uuid)
- ├─ name              ├─ name
- ├─ description       ├─ description
- ├─ category          ├─ root_path
- ├─ content           ├─ settings (token_budget, …)
- ├─ tags[]            └─ context_refs[]  (ordered)
- ├─ priority                ├─ context_id
- ├─ visibility              ├─ position
- ├─ status                  └─ priority_override (optional)
- ├─ version
- └─ token_count
+```bash
+context web --port 5173
+# → http://127.0.0.1:5173
 ```
 
-A project's `manifest.json` is a lightweight index — names, descriptions, categories, priorities, token counts. LLMs read it first, then fetch full content over MCP as needed.
+### Register the MCP server with Claude Code
 
-## CLI reference
+```bash
+claude mcp add context-window --scope user context-mcp
+```
+
+No `--project-id` is needed — the server auto-detects the active project from the nearest `.context/manifest.json` walking up from your working directory.
+
+Restart Claude Code, and the tools light up.
+
+---
+
+## Concepts
+
+### A **context** is a unit of knowledge
+
+```
+id           uuid
+name         "Rust Conventions"
+description  "How we write Rust in this codebase"   ← what LLMs read first
+category     "conventions"
+content      "# Rust Conventions\n..."              ← the actual body, in Markdown
+tags         ["rust", "backend"]
+priority     "important"                            ← critical / important / reference / archived
+visibility   "private"                              ← private / shared / public
+version      3                                      ← bumped on every update
+token_count  1240                                   ← pre-computed; trust it for budgeting
+```
+
+A context exists on its own. It is not owned by any project. You can attach the same context to many projects.
+
+### A **project** is a curated list of contexts
+
+A project has a name, a description, an optional root directory, and an **ordered** list of context references. Each reference can override the context's default priority for that project specifically.
+
+### The **manifest** is what your LLM actually reads
+
+Each project owns a `.context/manifest.json` that contains:
+
+- the project's name and description,
+- how to talk to the MCP server,
+- one entry per attached context (id, name, description, category, priority, token count — **not the content**),
+- the total token count of everything attached,
+- a short instruction block telling the LLM how to use the available tools.
+
+It's deliberately small so the LLM can read it on every session start without burning a serious slice of its context window.
+
+The body of each context is fetched on demand via `get_context`.
+
+---
+
+## CLI
 
 ### Contexts
-| Command | Purpose |
+
+| Command | What it does |
 |---|---|
-| `context init` | Create/upgrade the database |
-| `context new -n -d --content/--content-file ...` | Create a standalone context |
-| `context list [--category --status --tag --json]` | List contexts |
+| `context init` | Create / upgrade the local database |
+| `context new` | Create a new context (`-n`, `-d`, `--content` or `--content-file`, plus optional `--category`, `--tags`, `--priority`, `--visibility`) |
+| `context list` | List contexts with filters |
 | `context search <query>` | Full-text search (FTS5) |
-| `context show <id\|prefix>` | Display full content |
-| `context edit <id\|prefix>` | Open content in `$EDITOR` |
-| `context archive <id\|prefix>` | Set status to archived |
-| `context delete <id\|prefix> --yes` | Permanently delete (requires `--yes`) |
-| `context export [--ids ...]` | Dump as JSON |
-| `context import -f file.json` | Bulk import from JSON array |
-| `context serve [--project <id>]` | Run the MCP server (stdio) |
+| `context show <id\|prefix>` | Display a context's full content |
+| `context edit <id\|prefix>` | Edit content in `$EDITOR` |
+| `context archive <id\|prefix>` | Hide a context from manifests + search |
+| `context delete <id\|prefix> --yes` | Permanently delete (rare; prefer archive) |
+| `context export` / `context import` | Bulk JSON in/out |
+| `context stats` | Usage stats with `--scope`, `--tool`, `--context`, `--days` |
+| `context web` | Start the web UI |
+| `context serve` | Run the stdio MCP server for the current project |
+| `context setup` | Add a global Claude directive to `~/.claude/CLAUDE.md` |
 
 ### Projects
-| Command | Purpose |
+
+| Command | What it does |
 |---|---|
-| `project init [-n -d]` | Initialise a project in CWD, write manifest |
-| `project list` | List all projects |
-| `project attach <ctx-id> [--position N --priority P]` | Attach a context |
-| `project detach <ctx-id>` | Detach (context itself is kept) |
-| `project contexts` | Show the manifest's context list |
-| `project manifest [--stdout]` | Regenerate manifest |
-| `project budget --budget N` | Show which contexts fit a token budget |
-| `project reorder --ids id1,id2,id3` | Reorder attached contexts |
+| `context project init` | Create a project for the current directory, write the manifest, scaffold a `CLAUDE.md` directive |
+| `context project list` | List all projects |
+| `context project attach <ctx-id>` | Attach a context (idempotent upsert, optional `--position`, `--priority`) |
+| `context project detach <ctx-id>` | Detach (the context itself is preserved) |
+| `context project contexts` | List contexts attached to the current project |
+| `context project manifest` | Regenerate the manifest |
+| `context project budget --budget N` | Show which contexts fit a token budget |
+| `context project reorder --ids id1,id2,id3` | Re-order attached contexts |
+
+The active project is resolved as: `--project <id>` flag → `CONTEXT_PROJECT_ID` env → nearest `.context/manifest.json` walking up from your cwd.
+
+---
+
+## Web UI
+
+`context web` (default port `5173`) serves an Express app over HTTP on `127.0.0.1`. No login, single user, single machine.
+
+You can:
+
+- Browse, search, view, create, edit, archive, and delete contexts.
+- Create and view projects, attach / detach / reorder contexts, override priorities per project.
+- See usage stats per context and per project (panel at the bottom of each detail page).
+- See the **/dashboard** — five summary cards, an activity-over-time area chart, and bar charts for top tools, top contexts, top projects, and top clients (i.e. which LLM made the call).
+
+The UI is server-rendered HTML with no client-side JavaScript framework. Charts are inline SVG / CSS.
+
+---
 
 ## MCP server
 
-Stdio server exposing 15 tools. The active project is selected via, in order:
-1. `--project-id <id>` CLI flag
-2. `CONTEXT_PROJECT_ID` env var
-3. `project_id` field of the nearest `.context/manifest.json` on the filesystem
+The MCP server is a stdio binary, `context-mcp`, that any MCP-aware client can talk to. It exposes 16 tools:
 
-Tools:
-- `get_project_summary` — orientation tool; returns the manifest
-- `get_context` / `get_contexts_by_category` / `list_all_contexts`
-- `search_contexts` (`scope: "project" | "all"`)
-- `get_context_budget` — priority-ordered subset that fits a token budget
-- `create_context` / `update_context` (with optional `expected_version`)
-- `archive_context` / `delete_context` (requires `confirm: true`)
-- `attach_context` / `detach_context` / `reorder_contexts`
+**Reading the project**
+- `get_project_summary` — the manifest, freshly built. Call this first.
+- `get_context` — full content for one context id.
+- `get_contexts_by_category` — filter the attached set by category.
+- `list_all_contexts` — every context in the library, regardless of project.
+- `search_contexts` — FTS5 search; `scope: "project"` (default) or `"all"`.
+- `get_context_budget` — highest-priority subset that fits a given token budget.
+
+**Writing**
+- `create_context`, `update_context` (with optional `expected_version` for optimistic locking)
+- `archive_context`, `delete_context` (requires `confirm: true`)
+- `attach_context`, `detach_context`, `reorder_contexts`
 - `create_category`
-- `regenerate_manifest`
 
-Wire it into an MCP client (e.g., Claude Desktop) as a stdio server pointing at `dist/mcp/server.js` with `--project-id` of the project you want active.
+**Maintenance**
+- `regenerate_manifest`
+- `get_usage_stats` (scope: project / context / tool / overview)
+
+**Project resolution order:**
+
+1. `--project-id <uuid>` flag
+2. `CONTEXT_PROJECT_ID` env var
+3. `project_id` of the nearest `.context/manifest.json` walking up from the working directory
+
+Without an active project, only the library-wide tools work (`list_all_contexts`, `get_context`, `create_context`, `search_contexts` with `scope: "all"`).
+
+### Wire it into your client
+
+**Claude Code** — registers globally so it auto-detects the right project per repo:
+
+```bash
+claude mcp add context-window --scope user context-mcp
+```
+
+**Claude Desktop** (`claude_desktop_config.json`) — Desktop doesn't inherit your shell `PATH`, so use the absolute path that `which context-mcp` prints:
+
+```json
+{
+  "mcpServers": {
+    "context-window": {
+      "command": "/Users/you/.nvm/versions/node/v22.7.0/bin/context-mcp"
+    }
+  }
+}
+```
+
+### Make Claude actually use it
+
+By default Claude reads tool descriptions but doesn't proactively call tools. `context project init` writes (or appends to) a `CLAUDE.md` file in the project root that tells Claude to call `get_project_summary` at the start of every task. There's also a `context setup` command that adds a one-liner to `~/.claude/CLAUDE.md` so Claude picks up the tool whenever it sees a `.context/manifest.json` in any project.
+
+---
 
 ## Architecture
 
 ```
 src/
-├── core/         business logic, storage-agnostic
-│   ├── types.ts            Zod schemas + types
-│   ├── context-service.ts  context CRUD + auto manifest propagation
-│   ├── project-service.ts  attach/detach/reorder with list-insert semantics
-│   ├── manifest-service.ts manifest build, budget, cross-project regen
-│   ├── tokens.ts           gpt-tokenizer wrapper
-│   ├── services.ts         DI container
-│   └── errors.ts
-├── storage/      persistence
-│   ├── repository.ts             interface (cloud mode will reimplement)
-│   └── sqlite/sqlite-repository.ts  better-sqlite3 + FTS5
-├── mcp/          MCP server (stdio)
-│   ├── tools.ts            tool registry
-│   ├── server.ts           stdio entry point
-│   └── zod-to-json-schema.ts  minimal converter for tool listing
-├── cli/          commander-based CLI
-│   ├── context-commands.ts
-│   ├── project-commands.ts
-│   ├── active-project.ts   resolves "current project" (flag → env → manifest → cwd)
-│   └── output.ts
-└── config/paths.ts  DB + manifest path resolution
+├── core/           Business logic, storage-agnostic
+├── storage/        Repository interface + SQLite implementation
+├── mcp/            Stdio MCP server
+├── cli/            commander-based CLI
+├── web/            Express HTTP UI + dashboard
+└── config/         Path resolution
 ```
 
-Key invariants:
-- The manifest on disk is **derived state** — it is regenerated automatically whenever an attached context is created, updated, archived, or deleted, and whenever a project's attachments change.
-- Contexts with `status !== "active"` are excluded from manifests and budgets (they remain attached, just hidden from LLMs).
-- Position is always normalised to `0..n-1` after any attach/detach.
-- Tokens are computed on write, never on read.
+Key invariants (these are what the test suite enforces):
+
+- The manifest on disk is **derived state** — regenerated automatically on every mutation to attached contexts or attachments.
+- Contexts with `status !== "active"` are excluded from manifests, budgets, and search.
+- Positions in `project_contexts` are normalised to `0..n-1` after any mutation.
+- Token counts are computed on **write**, never on read.
+- Storage is transport-agnostic; core is UI-agnostic. Throw `DomainError` subclasses; transport layers format them.
+
+A cloud mode (Postgres backend + HTTP transport + multi-tenant auth) is intentionally **not** implemented. The Repository interface is the seam if you want to add one.
+
+---
 
 ## Tests
 
 ```bash
-node --test tests/services.test.mjs   # 7 unit tests over the service layer
-node tests/smoke.mjs                  # 27 end-to-end checks via CLI + MCP stdio
-npx tsc --noEmit                      # typecheck
+npm run typecheck                           # strict tsc, no emit
+npm run build
+node --test tests/services.test.mjs \
+            tests/usage.test.mjs            # 10 unit tests over the service layer
+node tests/smoke.mjs                        # 27 end-to-end checks spawning the built CLI + stdio MCP
+node tests/web-smoke.mjs                    # 30 HTTP checks against every web route
 ```
 
-The smoke test spawns the built CLI and the MCP server as real child processes, drives them through a sandbox temp directory, and asserts that the manifest on disk and MCP tool responses match expectations.
+All three suites must pass in CI before any change is merged.
+
+---
+
+## Configuration
+
+| Variable | Default | Effect |
+|---|---|---|
+| `CONTEXT_DB_PATH` | `~/.context-db/context.db` | SQLite file location |
+| `CONTEXT_PROJECT_ID` | (none) | Pin a specific project for the MCP server |
+| `CONTEXT_WEB_DEBUG` | (unset) | Log full stack traces from the web UI |
+
+---
 
 ## For AI coding agents
 
-This section is for agents that want to **use** this system — install the MCP server in their client, and call its tools effectively.
+If you're an LLM working with the context-window MCP server, here's how to use it well.
 
-### 1. Install the MCP server in your client
+1. **Start with `get_project_summary`.** It returns enough metadata to decide what to load.
+2. **Stay under your budget.** `get_context_budget` returns the highest-priority subset that fits.
+3. **Search before asking.** `search_contexts` with `scope: "all"` will tell you whether something is already captured before you re-ask the user.
+4. **Capture what you learn.** When the user explains something the next session will need, call `create_context` with a clear name + description and `created_by: "llm:<model>"`. `attach_context` if it's project-specific.
+5. **Be conservative with destructive ops.** Prefer `archive_context` over `delete_context`. Use `expected_version` on `update_context` to detect conflicts.
 
-Pick the project the server should serve. Either create it (`project init` in the project directory) or look one up:
+The tool descriptions are intentionally specific. Read them.
+
+---
+
+## Contributing
+
+Contributions are welcome. The project is small enough that a typical change touches one or two files plus a test.
+
+### Setting up
 
 ```bash
-node dist/cli/index.js project list
+git clone https://github.com/prodevuk/context-window.git
+cd context-window
+npm install
+npm run build
+npm run typecheck
+node --test tests/services.test.mjs tests/usage.test.mjs
+node tests/smoke.mjs
+node tests/web-smoke.mjs
 ```
 
-Note the project's UUID, then register a stdio MCP server in your client's config.
+Use `npm link` from the project root if you want the global `context` / `context-mcp` binaries to follow your local `dist/` (avoids re-installing after every build).
 
-**Claude Code** — add to `~/.claude.json` (user-level) or `.mcp.json` in the project root:
+### Where things live
 
-```json
-{
-  "mcpServers": {
-    "context-window": {
-      "command": "node",
-      "args": [
-        "/absolute/path/to/context-window/dist/mcp/server.js",
-        "--project-id",
-        "<project-uuid>"
-      ],
-      "env": {
-        "CONTEXT_DB_PATH": "/Users/you/.context-db/context.db"
-      }
-    }
-  }
-}
-```
+| You want to… | Open |
+|---|---|
+| Add an MCP tool | `src/mcp/tools.ts` — the tool is auto-listed via `ListToolsRequestSchema`, no extra wiring |
+| Add a CLI command | `src/cli/context-commands.ts` or `src/cli/project-commands.ts` |
+| Add a web route | `src/web/server.ts` (and `src/web/views.ts` for HTML) |
+| Add a field to Context / Project | `src/core/types.ts` → `src/storage/sqlite/schema.ts` → row mapping in `src/storage/sqlite/sqlite-repository.ts` |
+| Change manifest shape | `src/core/manifest-service.ts#build` and the `Manifest` schema in `types.ts` |
 
-**Claude Desktop** — same shape, in `claude_desktop_config.json`:
+### Pull-request checklist
 
-```json
-{
-  "mcpServers": {
-    "context-window": {
-      "command": "node",
-      "args": ["/absolute/path/to/context-window/dist/mcp/server.js"],
-      "env": {
-        "CONTEXT_PROJECT_ID": "<project-uuid>",
-        "CONTEXT_DB_PATH": "/Users/you/.context-db/context.db"
-      }
-    }
-  }
-}
-```
+- `npm run typecheck` is clean.
+- All three test suites pass (`services` + `usage` unit, `smoke`, `web-smoke`).
+- A new tool, CLI command, web route, or invariant has at least one matching assertion in `tests/`.
+- User-facing strings (CLI output, MCP tool descriptions, web UI labels, error messages) are in **British English**.
+- No new layer / abstraction unless an existing service genuinely cannot accommodate the change.
+- Commits are scoped and tell the why, not just the what.
 
-**Project resolution order** (the server picks the first that works):
-1. `--project-id <uuid>` flag
-2. `CONTEXT_PROJECT_ID` env var
-3. `project_id` field of the nearest `.context/manifest.json` walking up from the working directory
+### Issues and discussions
 
-Restart your client after editing the config. You should now see the tools listed below available.
+- Use GitHub Issues for bug reports and feature ideas.
+- For larger proposals (new transports, new entity types, schema migrations), open a discussion first so we can agree on the shape before code lands.
 
-### 2. How to use the tools
+### Code of conduct
 
-**Always start with `get_project_summary`.** It returns the project's name, description, and metadata for every attached context — names, descriptions, categories, priorities, and token counts. This is enough to decide what to load without reading any full bodies.
+Be kind. Be specific. Assume good faith. We'll add a formal CoC if the project grows beyond a handful of contributors.
 
-Then, depending on the task:
-
-| You want to… | Call | Notes |
-|---|---|---|
-| Load a specific context by id | `get_context` | Returns the full content. |
-| Stay within a token budget | `get_context_budget` | Returns the highest-priority subset that fits, plus what was excluded and why. |
-| Find context by keyword | `search_contexts` | Default `scope: "project"`. Pass `scope: "all"` to search the whole user library. |
-| Filter by category | `get_contexts_by_category` | Only searches the active project. |
-| See contexts not attached to this project | `list_all_contexts` | The user's full library. |
-| Capture something new you learned | `create_context` | Set `created_by: "llm:<your-model>"`. Returns `{ context, warnings }`. |
-| Attach a created/existing context to the project | `attach_context` | Idempotent (upsert). Optional `position` and `priority_override`. |
-| Edit an existing context | `update_context` | Pass `expected_version` for safe concurrent updates. |
-| Hide a context from the manifest | `archive_context` | Stays attached but excluded from summary/budget/search. |
-| Remove a context from the project | `detach_context` | Context itself is preserved in the library. |
-| Permanently delete | `delete_context` | **Requires `confirm: true`.** Prefer archiving. |
-| Reshuffle priority order | `reorder_contexts` | Pass the full ordered id list. |
-| Create a custom category | `create_category` | Categories are flat strings. |
-| Refresh the on-disk manifest | `regenerate_manifest` | Rarely needed — manifests auto-regenerate on every mutation. |
-
-### 3. Recommended workflow
-
-A reasonable default loop for an agent in a fresh conversation:
-
-1. Call `get_project_summary`. Read the descriptions to decide which contexts are relevant to the user's request.
-2. If your context budget is tight, call `get_context_budget` with the budget. Otherwise, call `get_context` on each relevant id.
-3. If the relevant context isn't attached, `search_contexts` with `scope: "all"` to see whether it exists somewhere in the user's library. If it does, `attach_context`. If not, ask the user whether to capture and `create_context` + `attach_context`.
-4. While working, when you learn something the user will want next time (a convention, a constraint, a decision, a person's preference), call `create_context` with a clear `name`, useful `description`, and `created_by: "llm:<model>"`. Decide attach-or-leave based on whether it's project-specific.
-5. To revise something you previously created, fetch the current version, then `update_context` with `expected_version` set to detect conflicts.
-
-### 4. Patterns and pitfalls
-
-- **Descriptions are catalogue entries.** They are what future-you and other agents use to decide whether to load the full content. Write them as one-line summaries of "what this contains and when it's useful," not as titles.
-- **Archive, don't delete.** `delete_context` requires `confirm: true` precisely because it's destructive. Default to `archive_context` unless the user explicitly asks for deletion.
-- **`status: "archived"` contexts are hidden** from `get_project_summary`, `get_context_budget`, `search_contexts`, and `get_contexts_by_category`. They still appear in `list_all_contexts` (so you can find and un-archive them via `update_context`).
-- **Optimistic locking.** If you pass `expected_version` to `update_context` and another writer has bumped the version, you get a `VERSION_CONFLICT` error — re-fetch with `get_context` and retry with the new version.
-- **`attach_context` is an upsert.** Calling it again with a different `position` or `priority_override` mutates the existing attachment rather than creating a duplicate.
-- **Position is list-insert.** `position: 0` puts the context first and shifts everything else down by one. Positions are always normalised to `0..n-1` after any mutation.
-- **Token counts are pre-computed.** They're stored on the context and trustworthy — use them for budgeting without re-tokenising.
-- **Search is FTS5 prefix matching.** Each whitespace-separated token becomes a `"token"*` prefix and tokens are OR-ed. Multi-word queries are loose; single distinctive terms are precise.
-- **No project = no project-scoped tools.** If the server starts without resolving a project (`NO_ACTIVE_PROJECT`), `get_project_summary`, `attach_context`, `detach_context`, and the project-scoped variants of `search_contexts` will error. `list_all_contexts`, `get_context`, `create_context`, and `search_contexts` with `scope: "all"` still work.
-
-### 5. Example session
-
-```jsonc
-// 1. Orient yourself
-→ get_project_summary {}
-← { project_name: "billing-service", contexts: [
-     { context_id: "…a1", name: "Rust Conventions", priority: "important", token_count: 1240 },
-     { context_id: "…b2", name: "Stripe Webhook Notes", priority: "critical", token_count: 820 }
-  ], total_token_count: 2060 }
-
-// 2. Load what you need
-→ get_context { context_id: "…b2" }
-← { id: "…b2", content: "...", version: 3, … }
-
-// 3. Capture a new finding mid-conversation
-→ create_context {
-    name: "Stripe Idempotency Key Convention",
-    description: "We always use <user_id>:<event_id> as the idempotency key for Stripe charges.",
-    content: "## Convention\n…",
-    category: "conventions",
-    tags: ["stripe", "billing"],
-    priority: "important",
-    created_by: "llm:claude-opus-4-7"
-  }
-← { context: { id: "…c3", … }, warnings: [] }
-
-→ attach_context { context_id: "…c3" }
-← { project: { id: "…", context_refs: [...] } }
-```
-
-### 6. If the server isn't responding
-
-- Run `node dist/cli/index.js project list` to confirm the project UUID still exists.
-- Check `CONTEXT_DB_PATH` — the server will silently create an empty DB if the path doesn't exist.
-- The server logs errors to stderr; redirect it (`2>/tmp/ctx.log`) if your client doesn't surface it.
-- Build is required after a `git pull`: `npm install && npm run build`.
+---
 
 ## Licence
 
-[MIT](./LICENSE) © 2026 Promise.
+[MIT](./LICENSE) © 2026 Prodevel Ltd.
