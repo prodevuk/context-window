@@ -1,0 +1,37 @@
+{
+  "name": "context-window",
+  "version": "0.1.0",
+  "description": "Context management system: standalone contexts, projects, and MCP server (local mode)",
+  "type": "module",
+  "bin": {
+    "context": "./dist/cli/index.js",
+    "context-mcp": "./dist/mcp/server.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev:cli": "tsx src/cli/index.ts",
+    "dev:mcp": "tsx src/mcp/server.ts",
+    "test": "node --test --import tsx tests/**/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "@types/express": "^5.0.6",
+    "better-sqlite3": "^11.3.0",
+    "commander": "^12.1.0",
+    "express": "^4.22.2",
+    "gpt-tokenizer": "^2.5.1",
+    "uuid": "^10.0.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.7.0",
+    "@types/uuid": "^10.0.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
