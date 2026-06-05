@@ -59,6 +59,24 @@ The web dashboard shows every MCP, CLI, and web call recorded over a configurabl
 
 You need **Node ≥ 20**.
 
+### Try it without installing
+
+```bash
+npx context-window web        # boots the web UI on http://127.0.0.1:5173
+npx context-window --help     # see every command
+```
+
+`npx` downloads the package on first run and caches it. The `context-window`,
+`context`, and `context-mcp` binaries are all available this way.
+
+### Install it for everyday use
+
+```bash
+npm install -g context-window     # puts `context`, `context-window` and `context-mcp` on your PATH
+```
+
+### Or build from source
+
 ```bash
 git clone https://github.com/prodevuk/context-window.git
 cd context-window
@@ -95,6 +113,12 @@ context web --port 5173
 
 ```bash
 claude mcp add context-window --scope user context-mcp
+```
+
+If you skipped the global install, point it at npx instead:
+
+```bash
+claude mcp add context-window --scope user -- npx -y -p context-window context-mcp
 ```
 
 No `--project-id` is needed — the server auto-detects the active project from the nearest `.context/manifest.json` walking up from your working directory.

@@ -3,16 +3,45 @@
   "version": "0.1.0",
   "description": "Context management system: standalone contexts, projects, and MCP server (local mode)",
   "type": "module",
+  "license": "MIT",
+  "author": "Prodevel Ltd",
+  "homepage": "https://github.com/prodevuk/context-window#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/prodevuk/context-window.git"
+  },
+  "bugs": {
+    "url": "https://github.com/prodevuk/context-window/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "ai",
+    "llm",
+    "context",
+    "cli",
+    "prompt-engineering",
+    "developer-tools"
+  ],
   "bin": {
     "context": "./dist/cli/index.js",
+    "context-window": "./dist/cli/index.js",
     "context-mcp": "./dist/mcp/server.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "dev:cli": "tsx src/cli/index.ts",
     "dev:mcp": "tsx src/mcp/server.ts",
     "test": "node --test --import tsx tests/**/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
